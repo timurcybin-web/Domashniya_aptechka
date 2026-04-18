@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Домашняя Аптечка</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .main-container { max-width: 960px; margin: 40px auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+        .add-card { border-left: 5px solid #0d6efd; background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .description-text { font-size: 0.9rem; color: #6c757d; font-style: italic; }
+
+        tr.status-expired { background-color: #fff5f5; }
+        tr.status-expired td { border-left: 3px solid #dc3545; }
+        tr.status-warning { background-color: #fffbf0; }
+        tr.status-warning td { border-left: 3px solid #fd7e14; }
+
+        .expiry-expired { font-weight: bold; color: #dc3545; }
+        .expiry-warning { font-weight: bold; color: #fd7e14; }
+        .expiry-ok { font-weight: bold; color: #198754; }
+
+        .stat-card { border-radius: 10px; padding: 16px 20px; text-align: center; }
+        .stat-card .stat-num { font-size: 2rem; font-weight: 700; line-height: 1; }
+        .stat-card .stat-label { font-size: 0.8rem; margin-top: 4px; opacity: 0.85; }
+    </style>
+</head>
+<body>
+
+<div class="container main-container">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="text-primary mb-0">💊 Домашняя Аптечка</h2>
+        <div class="text-end">
+            <small class="text-muted d-block">Пользователь: <b>{{ current_user.username }}</b></small>
+            <div class="mt-1 d-flex gap-1 justify-content-end">
+                <a href="{{ url_for('profile') }}" class="btn btn-sm btn-outline-secondary">⚙️ Профиль</a>
+                <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-danger">Выйти</a>
+            </div>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- Счётчики -->
+    <div class="row g-3 mb-4">
+        <div class="col-4">
+            <div class="stat-card bg-primary text-white">
+                <div class="stat-num">{{ stats.total }}</div>
+                <div class="stat-label">Всего препаратов</div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="stat-card bg-warning text-white">
+                <div class="stat-num">{{ stats.expiring_soon }}</div>
+                <div class="stat-label">Истекает (≤{{ warning_days }} дней)</div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="stat-card bg-danger text-white">
+                <div class="stat-num">{{ stats.expired }}</div>
+                <div class="stat-label">Просрочено</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Предупреждение + кнопка email -->
+    {% if stats.expired > 0 or stats.expiring_soon > 0 %}
+    <div class="alert alert-warning d-flex justify-content-between align-items-center py-2 mb-4">
+        <span>⚠️ Есть лекарства, требующие внимания</span>
+        <a href="{{ url_for('send_notification') }}" class="btn btn-sm btn-warning">
+            📧 Отправить напоминание на email
+        </a>
+    </div>
+    {% endif %}
+
+    <!-- Форма добавления -->
+    <div class="add-card">
+        <h5 class="mb-3">Добавить лекарство</h5>
+        <form action="/add" method="POST" class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label small">Название препарата</label>
+                <input type="text" name="name" id="med-input" class="form-control"
+                       placeholder="Начните вводить..." list="med-suggestions" required autocomplete="off">
+                <datalist id="med-suggestions"></datalist>
+                <div id="temp-desc" class="form-text text-primary" style="display:none;"></div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Срок годности</label>
+                <input type="date" name="expiry" class="form-control" required>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">Добавить</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Таблица -->
+    <h5 class="mb-3">Ваши медикаменты</h5>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width: 25%;">Название</th>
+                    <th style="width: 42%;">О препарате</th>
+                    <th style="width: 18%;">Годен до</th>
+                    <th style="width: 15%;" class="text-center">Удалить</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for med, status in meds_with_status %}
+                <tr class="status-{{ status }}">
+                    <td>
+                        <strong>{{ med.name }}</strong>
+                        {% if status == 'expired' %}
+                            <span class="badge bg-danger ms-1">Просрочено</span>
+                        {% elif status == 'warning' %}
+                            <span class="badge bg-warning text-dark ms-1">Истекает</span>
+                        {% endif %}
+                    </td>
+                    <td class="description-text">{{ med.description }}</td>
+                    <td class="expiry-{{ status }}">{{ med.expiry_date }}</td>
+                    <td class="text-center">
+                        <a href="/delete/{{ med.id }}" class="btn btn-sm btn-link text-danger">❌</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="text-center py-4 text-muted">В аптечке пока пусто. Добавьте ваше первое лекарство!</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if stats.total > 0 %}
+    <div class="d-flex gap-3 mt-2" style="font-size:0.8rem; color:#6c757d;">
+        <span><span style="color:#dc3545">■</span> Просрочено</span>
+        <span><span style="color:#fd7e14">■</span> Истекает в ближайшие {{ warning_days }} дней</span>
+        <span><span style="color:#198754">■</span> В порядке</span>
+    </div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const medInput = document.getElementById('med-input');
+    const dataList = document.getElementById('med-suggestions');
+    const tempDesc = document.getElementById('temp-desc');
+    let cache = {};
+
+    function showDesc(name) {
+        if (cache[name]) {
+            tempDesc.textContent = "Инфо: " + cache[name];
+            tempDesc.style.display = 'block';
+        } else {
+            tempDesc.style.display = 'none';
+        }
+    }
+
+    medInput.addEventListener('input', function() {
+        const query = this.value;
+        showDesc(query);
+        if (query.length < 2) {
+            dataList.innerHTML = '';
+            tempDesc.style.display = 'none';
+            return;
+        }
+        fetch(`/search_meds?q=${encodeURIComponent(query)}`)
+            .then(r => r.json())
+            .then(data => {
+                dataList.innerHTML = '';
+                data.forEach(item => {
+                    cache[item.name] = item.desc;
+                    const opt = document.createElement('option');
+                    opt.value = item.name;
+                    dataList.appendChild(opt);
+                });
+                showDesc(medInput.value);
+            })
+            .catch(err => console.error('Ошибка API:', err));
+    });
+</script>
+
+</body>
+</html>
