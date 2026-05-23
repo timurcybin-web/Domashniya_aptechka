@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Аналитика сессий — Домашняя Аптечка</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .main-container { max-width: 1000px; margin: 40px auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+        .stat-card { border-radius: 10px; padding: 16px 20px; text-align: center; }
+        .stat-card .stat-num { font-size: 2rem; font-weight: 700; line-height: 1; }
+        .stat-card .stat-label { font-size: 0.8rem; margin-top: 4px; opacity: 0.85; }
+        .badge-active { background: #d1fae5; color: #065f46; font-size: 0.75rem; padding: 2px 8px; border-radius: 20px; }
+        .badge-closed { background: #f3f4f6; color: #6b7280; font-size: 0.75rem; padding: 2px 8px; border-radius: 20px; }
+        table th { font-weight: 600; }
+        canvas { max-height: 220px; }
+    </style>
+</head>
+<body>
+<div class="container main-container">
+
+    <!-- Заголовок -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="text-primary mb-0">📊 Аналитика сессий</h2>
+        <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-secondary">← Назад</a>
+    </div>
+
+    <!-- Карточки-сводки -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="stat-card bg-primary text-white">
+                <div class="stat-num">{{ total_sessions }}</div>
+                <div class="stat-label">Всего сессий</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card bg-success text-white">
+                <div class="stat-num">{{ total_page_views }}</div>
+                <div class="stat-label">Страниц просмотрено</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card bg-warning text-dark">
+                <div class="stat-num">{{ total_actions }}</div>
+                <div class="stat-label">Действий выполнено</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card bg-info text-white">
+                <div class="stat-num">{{ avg_duration }}<small style="font-size:1rem"> мин</small></div>
+                <div class="stat-label">Среднее время сессии</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+        <!-- График визитов по дням -->
+        <div class="col-md-7">
+            <div class="p-3 border rounded">
+                <h6 class="mb-3 text-muted fw-semibold">📅 Визиты за последние 30 дней</h6>
+                {% if daily_stats %}
+                <canvas id="dailyChart"></canvas>
+                {% else %}
+                <p class="text-muted text-center py-4">Нет данных за последние 30 дней</p>
+                {% endif %}
+            </div>
+        </div>
+        <!-- Топ страниц -->
+        <div class="col-md-5">
+            <div class="p-3 border rounded h-100">
+                <h6 class="mb-3 text-muted fw-semibold">🔝 Самые посещаемые страницы</h6>
+                {% if top_pages %}
+                <table class="table table-sm">
+                    <thead><tr><th>Страница</th><th class="text-end">Просм.</th></tr></thead>
+                    <tbody>
+                    {% for p in top_pages %}
+                    <tr>
+                        <td><code>{{ p.page }}</code></td>
+                        <td class="text-end">{{ p.cnt }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted text-center py-4">Нет данных</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Таблица последних сессий -->
+    <h6 class="mb-3 text-muted fw-semibold">🕓 Последние сессии (до 50)</h6>
+    {% if user_sessions %}
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    <th>Вход</th>
+                    <th>Выход</th>
+                    <th>Длительность</th>
+                    <th class="text-center">Страниц</th>
+                    <th class="text-center">Действий</th>
+                    <th>IP</th>
+                    <th>Статус</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for s in user_sessions %}
+            <tr>
+                <td class="text-muted small">{{ loop.index }}</td>
+                <td class="small">{{ s.login_time.strftime('%d.%m.%Y %H:%M') }}</td>
+                <td class="small">
+                    {% if s.logout_time %}
+                        {{ s.logout_time.strftime('%d.%m.%Y %H:%M') }}
+                    {% else %}
+                        <span class="text-success">сейчас</span>
+                    {% endif %}
+                </td>
+                <td class="small">{{ s.duration_minutes }} мин</td>
+                <td class="text-center">{{ s.page_views }}</td>
+                <td class="text-center">{{ s.actions_count }}</td>
+                <td class="small text-muted">{{ s.ip_address or '—' }}</td>
+                <td>
+                    {% if s.is_active %}
+                        <span class="badge-active">● активна</span>
+                    {% else %}
+                        <span class="badge-closed">завершена</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted text-center py-4">Нет записей о сессиях</p>
+    {% endif %}
+
+</div>
+
+<script>
+{% if daily_stats %}
+const labels = {{ daily_stats | map(attribute='day') | list | tojson }};
+const data   = {{ daily_stats | map(attribute='visits') | list | tojson }};
+new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: {
+        labels,
+        datasets: [{
+            label: 'Визиты',
+            data,
+            backgroundColor: 'rgba(13, 110, 253, 0.55)',
+            borderColor: 'rgba(13, 110, 253, 0.9)',
+            borderWidth: 1,
+            borderRadius: 4,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            y: { beginAtZero: true, ticks: { stepSize: 1 } },
+            x: { ticks: { maxRotation: 45 } }
+        }
+    }
+});
+{% endif %}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

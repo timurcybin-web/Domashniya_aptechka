@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ: Аналитика — Домашняя Аптечка</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { width: 240px; min-height: 100vh; background: #1e293b; color: #cbd5e1; padding: 24px 16px; position: fixed; top: 0; left: 0; overflow-y: auto; }
+        .sidebar h5 { color: #fff; font-size: 1rem; font-weight: 700; margin-bottom: 20px; }
+        .sidebar .nav-link { color: #94a3b8; padding: 6px 10px; border-radius: 6px; font-size: 0.9rem; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: #334155; color: #fff; }
+        .main { margin-left: 240px; padding: 28px; }
+        .stat-card { border-radius: 12px; padding: 18px 20px; height: 100%; }
+        .stat-card .num  { font-size: 2rem; font-weight: 700; line-height: 1; }
+        .stat-card .lbl  { font-size: 0.75rem; margin-top: 4px; opacity: 0.85; }
+        .stat-card .sub  { font-size: 0.72rem; opacity: 0.65; margin-top: 2px; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+        .table th { font-weight: 600; font-size: 0.82rem; color: #64748b; }
+        .table td { font-size: 0.84rem; vertical-align: middle; }
+        .badge-active  { background:#d1fae5; color:#065f46; font-size:.7rem; padding:2px 8px; border-radius:20px; }
+        .badge-closed  { background:#f1f5f9; color:#94a3b8; font-size:.7rem; padding:2px 8px; border-radius:20px; }
+        .badge-admin   { background:#fef3c7; color:#92400e; font-size:.7rem; padding:2px 8px; border-radius:20px; }
+        .badge-f { background:#fce7f3; color:#9d174d; font-size:.72rem; padding:2px 7px; border-radius:20px; }
+        .badge-m { background:#dbeafe; color:#1e40af; font-size:.72rem; padding:2px 7px; border-radius:20px; }
+        .filter-box { background:#fff; border-radius:10px; padding:14px 16px; box-shadow:0 1px 6px rgba(0,0,0,.05); margin-bottom:20px; }
+        .section-label { font-size:.85rem; font-weight:600; color:#64748b; margin-bottom:12px; }
+        .chart-note { font-size:.72rem; color:#94a3b8; margin-top:4px; }
+        canvas { max-height:210px; }
+        .filter-active { border-left: 3px solid #0d6efd; padding-left: 8px; }
+        @media(max-width:768px){ .sidebar{display:none;} .main{margin-left:0;padding:16px;} }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h5>🛡 Панель администратора</h5>
+    <nav class="nav flex-column gap-1">
+        <a class="nav-link active" href="{{ url_for('admin_analytics') }}">📊 Аналитика</a>
+        <a class="nav-link" href="{{ url_for('index') }}">💊 Аптечка</a>
+        <a class="nav-link" href="{{ url_for('logout') }}">← Выйти</a>
+    </nav>
+    <hr style="border-color:#334155;margin:24px 0 12px">
+    <div style="font-size:.78rem;color:#64748b;">Администратор</div>
+    <div style="color:#e2e8f0;font-weight:600;">{{ current_user.username }}</div>
+</div>
+
+<div class="main">
+
+    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+        <div>
+            <h4 class="mb-0 fw-bold">Аналитика</h4>
+            <small class="text-muted">Мониторинг активности и демография пользователей</small>
+        </div>
+        {% if selected_gender or age_min or age_max %}
+        <div class="d-flex gap-1 flex-wrap">
+            {% if selected_gender %}
+            <span class="badge bg-primary">Пол: {{ 'Женщины' if selected_gender == 'F' else 'Мужчины' }}</span>
+            {% endif %}
+            {% if age_min or age_max %}
+            <span class="badge bg-primary">Возраст: {{ age_min or '...' }} – {{ age_max or '...' }}</span>
+            {% endif %}
+            <a href="?user_id={{ selected_user_id or '' }}&period={{ period_days }}" class="badge bg-secondary text-decoration-none">✕ сбросить</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ===== ФИЛЬТРЫ ===== -->
+    {% set bp = '?user_id=' ~ (selected_user_id or '') ~ '&period=' ~ period_days ~ '&age_min=' ~ age_min ~ '&age_max=' ~ age_max %}
+    {% set bg = '?user_id=' ~ (selected_user_id or '') ~ '&period=' ~ period_days ~ '&gender=' ~ selected_gender ~ '&age_min=' ~ age_min ~ '&age_max=' ~ age_max %}
+
+    <div class="filter-box">
+        <div class="d-flex flex-wrap gap-3 align-items-center">
+
+            <!-- Пользователь -->
+            <form method="GET" class="d-flex align-items-center gap-2 m-0">
+                <input type="hidden" name="period"  value="{{ period_days }}">
+                <input type="hidden" name="gender"  value="{{ selected_gender }}">
+                <input type="hidden" name="age_min" value="{{ age_min }}">
+                <input type="hidden" name="age_max" value="{{ age_max }}">
+                <span class="text-muted small text-nowrap">Пользователь:</span>
+                <select name="user_id" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()">
+                    <option value="">Все</option>
+                    {% for u in all_users %}
+                    <option value="{{ u.id }}" {% if selected_user_id == u.id %}selected{% endif %}>
+                        {{ u.username }}{% if u.is_admin %} ★{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </form>
+
+            <!-- Период -->
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-muted small text-nowrap">Период:</span>
+                <div class="btn-group btn-group-sm">
+                    {% for p in [7, 30, 90] %}
+                    <a href="{{ bg }}&period={{ p }}" class="btn btn-sm {% if period_days == p %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ p }} дн.</a>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Пол -->
+            <div class="d-flex align-items-center gap-2 {% if selected_gender %}filter-active{% endif %}">
+                <span class="text-muted small text-nowrap">Пол:</span>
+                <div class="btn-group btn-group-sm">
+                    <a href="{{ bp }}&gender="  class="btn btn-sm {% if not selected_gender %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Все</a>
+                    <a href="{{ bp }}&gender=F" class="btn btn-sm {% if selected_gender=='F' %}btn-danger{% else %}btn-outline-danger{% endif %}">♀ Женщины</a>
+                    <a href="{{ bp }}&gender=M" class="btn btn-sm {% if selected_gender=='M' %}btn-primary{% else %}btn-outline-primary{% endif %}">♂ Мужчины</a>
+                </div>
+            </div>
+
+            <!-- Возраст -->
+            <form method="GET" class="d-flex align-items-center gap-2 m-0 {% if age_min or age_max %}filter-active{% endif %}">
+                <input type="hidden" name="user_id" value="{{ selected_user_id or '' }}">
+                <input type="hidden" name="period"  value="{{ period_days }}">
+                <input type="hidden" name="gender"  value="{{ selected_gender }}">
+                <span class="text-muted small text-nowrap">Возраст:</span>
+                <input type="number" name="age_min" class="form-control form-control-sm" style="width:62px" placeholder="от" value="{{ age_min }}" min="1" max="100">
+                <span class="text-muted">—</span>
+                <input type="number" name="age_max" class="form-control form-control-sm" style="width:62px" placeholder="до" value="{{ age_max }}" min="1" max="100">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">OK</button>
+                {% if age_min or age_max %}
+                <a href="{{ bp }}&gender={{ selected_gender }}" class="btn btn-sm btn-outline-danger" title="Сбросить">✕</a>
+                {% endif %}
+            </form>
+
+        </div>
+    </div>
+
+    <!-- ===== СВОДНЫЕ КАРТОЧКИ ===== -->
+    <div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-3 mb-4">
+        <div class="col">
+            <div class="stat-card bg-primary text-white">
+                <div class="num">{{ total_sessions }}</div>
+                <div class="lbl">Сессий за период</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="stat-card bg-success text-white">
+                <div class="num">{{ unique_users }}</div>
+                <div class="lbl">Активных пользователей</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="stat-card bg-warning text-dark">
+                <div class="num">{{ total_page_views }}</div>
+                <div class="lbl">Страниц просмотрено</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="stat-card bg-info text-white">
+                <div class="num">{{ total_actions }}</div>
+                <div class="lbl">Действий выполнено</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="stat-card text-white" style="background:#6f42c1;">
+                <div class="num">{{ filtered_users_count }}</div>
+                <div class="lbl">
+                    {% if selected_gender or age_min or age_max %}Пользователей по фильтру
+                    {% else %}Всего зарегистрировано{% endif %}
+                </div>
+                {% if selected_gender or age_min or age_max %}
+                <div class="sub">Всего в системе: {{ total_users }}</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== ВИЗИТЫ + ТОП СТРАНИЦ ===== -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-8">
+            <div class="card p-3 h-100">
+                <div class="section-label">📅 Визиты по дням</div>
+                {% if daily_stats %}
+                <canvas id="dailyChart"></canvas>
+                {% else %}
+                <p class="text-muted text-center py-5">Нет данных за выбранный период</p>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card p-3 h-100">
+                <div class="section-label">🔝 Топ страниц</div>
+                {% if top_pages %}
+                <table class="table table-sm mb-0">
+                    {% for p in top_pages %}
+                    <tr>
+                        <td><code style="font-size:.78rem;">{{ p.page }}</code></td>
+                        <td class="text-end text-muted small">{{ p.cnt }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% else %}
+                <p class="text-muted text-center py-4">Нет данных</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== ДЕМОГРАФИЯ ===== -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-4">
+            <div class="card p-3 h-100">
+                <div class="section-label">⚥ Распределение по полу</div>
+                {% if age_min or age_max %}
+                <div class="chart-note mb-2">Возраст {{ age_min or '...' }}–{{ age_max or '...' }} лет</div>
+                {% endif %}
+                <canvas id="genderChart" style="max-height:180px;"></canvas>
+                <div class="mt-3 d-flex flex-wrap gap-2 justify-content-center" style="font-size:.8rem;">
+                    <span><span style="color:#e91e8c;">■</span> Женщины: <b>{{ gender_stats.F }}</b></span>
+                    <span><span style="color:#2196F3;">■</span> Мужчины: <b>{{ gender_stats.M }}</b></span>
+                    {% if gender_stats.unknown %}
+                    <span><span style="color:#9e9e9e;">■</span> Не указан: <b>{{ gender_stats.unknown }}</b></span>
+                    {% endif %}
+                </div>
+                {% if avg_age %}
+                <div class="text-center mt-2 text-muted" style="font-size:.82rem;">Средний возраст: <b>{{ avg_age }} лет</b></div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-8">
+            <div class="card p-3 h-100">
+                <div class="section-label">🎂 Возрастное распределение
+                    {% if selected_gender %}
+                    <span class="chart-note ms-1">({{ 'женщины' if selected_gender == 'F' else 'мужчины' }})</span>
+                    {% endif %}
+                </div>
+                <canvas id="ageChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== РЕЕСТР ПОЛЬЗОВАТЕЛЕЙ ===== -->
+    <div class="card p-3 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="section-label mb-0">
+                👤 Все пользователи
+                <span class="text-muted fw-normal">({{ user_registry | length }}
+                {% if selected_gender or age_min or age_max %} по фильтру / {{ total_users }} всего{% endif %})</span>
+            </div>
+        </div>
+        {% if user_registry %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Пользователь</th>
+                        <th class="text-center">Пол</th>
+                        <th class="text-center">Возраст</th>
+                        <th>Дата рождения</th>
+                        <th>Email</th>
+                        <th class="text-center">Препаратов</th>
+                        <th class="text-center">Права</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for u in user_registry %}
+                <tr>
+                    <td>
+                        <a href="?user_id={{ u.id }}&period={{ period_days }}&gender={{ selected_gender }}&age_min={{ age_min }}&age_max={{ age_max }}"
+                           class="text-decoration-none fw-semibold">{{ u.username }}</a>
+                    </td>
+                    <td class="text-center">
+                        {% if u.gender == 'F' %}<span class="badge-f">♀</span>
+                        {% elif u.gender == 'M' %}<span class="badge-m">♂</span>
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td class="text-center {% if not u.age %}text-muted{% endif %}">{{ u.age or '—' }}</td>
+                    <td class="text-muted small">{{ u.birth_date or '—' }}</td>
+                    <td class="text-muted small">{{ u.email or '—' }}</td>
+                    <td class="text-center">{{ u.meds_count }}</td>
+                    <td class="text-center">{% if u.is_admin %}<span class="badge-admin">★ admin</span>{% endif %}</td>
+                    <td class="text-end">
+                        <a href="{{ url_for('make_admin', user_id=u.id) }}"
+                           class="btn btn-outline-secondary btn-sm"
+                           onclick="return confirm('Изменить права для {{ u.username }}?')">
+                            {% if u.is_admin %}Снять admin{% else %}Дать admin{% endif %}
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4">Нет пользователей, соответствующих фильтру</p>
+        {% endif %}
+    </div>
+
+    <!-- ===== АКТИВНОСТЬ ПО ПОЛЬЗОВАТЕЛЯМ (сессии) ===== -->
+    {% if not selected_user_id %}
+    <div class="card p-3 mb-4">
+        <div class="section-label">📊 Активность по пользователям (сессии за период)</div>
+        {% if user_visits %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Пользователь</th>
+                        <th class="text-center">Пол</th>
+                        <th class="text-center">Возраст</th>
+                        <th class="text-center">Сессий</th>
+                        <th class="text-center">Страниц</th>
+                        <th class="text-center">Действий</th>
+                        <th class="text-center">Ср. время</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for u in user_visits %}
+                <tr>
+                    <td>
+                        <a href="?user_id={{ u.id }}&period={{ period_days }}&gender={{ selected_gender }}&age_min={{ age_min }}&age_max={{ age_max }}"
+                           class="text-decoration-none fw-semibold">{{ u.username }}</a>
+                    </td>
+                    <td class="text-center">
+                        {% if u.gender == 'F' %}<span class="badge-f">♀</span>
+                        {% elif u.gender == 'M' %}<span class="badge-m">♂</span>
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td class="text-center text-muted">{{ u.age }}</td>
+                    <td class="text-center">{{ u.visits }}</td>
+                    <td class="text-center">{{ u.views }}</td>
+                    <td class="text-center">{{ u.actions }}</td>
+                    <td class="text-center">{{ u.avg_min }} мин</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4">Нет активности за период</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- ===== ЛОГ СЕССИЙ ===== -->
+    <div class="card p-3">
+        <div class="section-label">🕓 Последние сессии (до 100)</div>
+        {% if recent_sessions %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" style="font-size:.82rem;">
+                <thead>
+                    <tr>
+                        <th>Пользователь</th>
+                        <th>Вход</th>
+                        <th>Выход</th>
+                        <th class="text-center">Мин</th>
+                        <th class="text-center">Стр.</th>
+                        <th class="text-center">Дейст.</th>
+                        <th>IP</th>
+                        <th>Браузер</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for s in recent_sessions %}
+                <tr>
+                    <td>
+                        <a href="?user_id={{ s.user_id }}&period={{ period_days }}&gender={{ selected_gender }}&age_min={{ age_min }}&age_max={{ age_max }}"
+                           class="text-decoration-none">{{ s.user.username }}</a>
+                    </td>
+                    <td>{{ s.login_time.strftime('%d.%m %H:%M') }}</td>
+                    <td>{% if s.logout_time %}{{ s.logout_time.strftime('%d.%m %H:%M') }}{% else %}<span class="text-success">сейчас</span>{% endif %}</td>
+                    <td class="text-center">{{ s.duration_minutes }}</td>
+                    <td class="text-center">{{ s.page_views }}</td>
+                    <td class="text-center">{{ s.actions_count }}</td>
+                    <td class="text-muted">{{ s.ip_address or '—' }}</td>
+                    <td class="text-muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ s.user_agent }}">{{ s.user_agent or '—' }}</td>
+                    <td>{% if s.is_active %}<span class="badge-active">● онлайн</span>{% else %}<span class="badge-closed">завершена</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4">Нет сессий за выбранный период</p>
+        {% endif %}
+    </div>
+
+</div>
+
+<script>
+{% if daily_stats %}
+new Chart(document.getElementById('dailyChart'), {
+    type: 'line',
+    data: {
+        labels: {{ daily_stats | map(attribute='day') | list | tojson }},
+        datasets: [{ label: 'Визиты', data: {{ daily_stats | map(attribute='visits') | list | tojson }},
+            fill: true, backgroundColor: 'rgba(13,110,253,0.1)', borderColor: 'rgba(13,110,253,0.85)',
+            tension: 0.3, pointRadius: 4 }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { ticks: { maxRotation: 45 } } } }
+});
+{% endif %}
+
+new Chart(document.getElementById('genderChart'), {
+    type: 'doughnut',
+    data: {
+        labels: ['Женщины', 'Мужчины', 'Не указан'],
+        datasets: [{ data: [{{ gender_stats.F }}, {{ gender_stats.M }}, {{ gender_stats.unknown }}],
+            backgroundColor: ['#e91e8c', '#2196F3', '#9e9e9e'], borderWidth: 2, hoverOffset: 6 }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } }, cutout: '60%' }
+});
+
+(function(){
+    const b = {{ age_buckets | tojson }};
+    new Chart(document.getElementById('ageChart'), {
+        type: 'bar',
+        data: {
+            labels: Object.keys(b),
+            datasets: [{ label: 'Пользователей', data: Object.values(b),
+                backgroundColor: ['rgba(13,110,253,.5)','rgba(13,110,253,.6)','rgba(13,110,253,.7)',
+                    'rgba(13,110,253,.85)','rgba(13,110,253,.65)','rgba(13,110,253,.5)','rgba(108,117,125,.45)'],
+                borderRadius: 6 }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+    });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
