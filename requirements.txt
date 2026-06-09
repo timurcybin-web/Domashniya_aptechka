@@ -1,7 +1,9 @@
 flask
 flask-sqlalchemy
 flask-login
+flask-mail
 werkzeug
 pandas
 openpyxl
 gunicorn
+python-dotenv

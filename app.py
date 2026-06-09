@@ -1,31 +1,42 @@
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import date, datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, session, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_mail import Mail, Message
+from markupsafe import escape
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# Загружаем переменные окружения из .env (если файл есть и установлен python-dotenv)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'dev_key_123'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///meds.db'
+
+# Секреты читаются из переменных окружения (см. .env.example).
+# Значения по умолчанию подходят только для локальной разработки.
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-change-me')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///meds.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Настройки email
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USERNAME'] = 'domashniyaaptechka@gmail.com'
-app.config['MAIL_PASSWORD'] = 'rkpnarlnokpiawxt'
-app.config['MAIL_FROM'] = 'domashniyaaptechka@gmail.com'
+# Настройки email (берутся из окружения, в коде секретов нет)
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_FROM', os.environ.get('MAIL_USERNAME'))
 
 EXPIRY_WARNING_DAYS = 30  # За сколько дней предупреждать
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+mail = Mail(app)
 
 
 # --- МОДЕЛИ ДАННЫХ ---
@@ -215,17 +226,15 @@ def send_expiry_email(user, expiring_meds):
     """Отправляет письмо пользователю со списком истекающих лекарств"""
     if not user.email:
         return False
+    if not app.config['MAIL_USERNAME'] or not app.config['MAIL_PASSWORD']:
+        app.logger.warning("Email не отправлен: не заданы MAIL_USERNAME / MAIL_PASSWORD в окружении")
+        return False
 
     try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = '💊 Домашняя аптечка: лекарства с истекающим сроком годности'
-        msg['From'] = app.config['MAIL_FROM']
-        msg['To'] = user.email
-
         rows = ''.join(
-            f'<tr><td style="padding:8px;border-bottom:1px solid #eee"><b>{m.name}</b></td>'
+            f'<tr><td style="padding:8px;border-bottom:1px solid #eee"><b>{escape(m.name)}</b></td>'
             f'<td style="padding:8px;border-bottom:1px solid #eee;color:{"#dc3545" if get_expiry_status(m.expiry_date)=="expired" else "#fd7e14"}">'
-            f'{"⚠️ ПРОСРОЧЕНО" if get_expiry_status(m.expiry_date)=="expired" else m.expiry_date}'
+            f'{"⚠️ ПРОСРОЧЕНО" if get_expiry_status(m.expiry_date)=="expired" else escape(m.expiry_date)}'
             f'</td></tr>'
             for m in expiring_meds
         )
@@ -233,7 +242,7 @@ def send_expiry_email(user, expiring_meds):
         html = f"""
         <div style="font-family:sans-serif;max-width:500px;margin:0 auto">
           <h2 style="color:#0d6efd">💊 Домашняя Аптечка</h2>
-          <p>Здравствуйте, <b>{user.username}</b>!</p>
+          <p>Здравствуйте, <b>{escape(user.username)}</b>!</p>
           <p>Следующие лекарства требуют вашего внимания:</p>
           <table style="width:100%;border-collapse:collapse">
             <thead><tr style="background:#f8f9fa">
@@ -248,16 +257,15 @@ def send_expiry_email(user, expiring_meds):
         </div>
         """
 
-        msg.attach(MIMEText(html, 'html'))
-
-        with smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT']) as server:
-            server.starttls()
-            server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
-            server.sendmail(app.config['MAIL_FROM'], user.email, msg.as_string())
-
+        msg = Message(
+            subject='💊 Домашняя аптечка: лекарства с истекающим сроком годности',
+            recipients=[user.email],
+            html=html,
+        )
+        mail.send(msg)
         return True
     except Exception as e:
-        print(f"Ошибка отправки email: {e}")
+        app.logger.error(f"Ошибка отправки email: {e}")
         return False
 
 
@@ -372,7 +380,7 @@ def send_notification():
         _log_action()
         flash(f'✅ Письмо отправлено на {current_user.email}', 'success')
     else:
-        flash('❌ Ошибка при отправке письма. Проверьте настройки почты в app.py.', 'danger')
+        flash('❌ Ошибка при отправке письма. Проверьте настройки в файле .env.', 'danger')
 
     return redirect(url_for('index'))
 
